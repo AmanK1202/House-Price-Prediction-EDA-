@@ -1,0 +1,359 @@
+---
+title: "Final Project"
+author: "Sudip Padhye"
+date: "4/18/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+install.packages("tidyverse")
+install.packages("corrplot")
+install.packages("NHANES")
+install.packages("arm")
+install.packages("broom")
+install.packages("mgcv")
+install.packages("mapproj")
+install.packages("maps")
+install.packages("gridExtra")
+install.packages("grid")
+install.packages("ggthemes")
+install.packages("caret")
+
+
+library(tidyverse)
+library(corrplot)
+library(NHANES)
+library(arm)
+library(broom)
+library(mgcv)
+library(mapproj)
+library(maps)
+library(gridExtra)
+library(grid)
+library(ggthemes)
+library(caret)
+```
+
+```{r}
+data = read.csv("HousePricePrediction.csv")
+data = data[c('X1stFlrSF', 'X2ndFlrSF', 'BedroomAbvGr', 'KitchenAbvGr', 'YearBuilt', 'Neighborhood', 'SalePrice')]
+
+location_data = read.csv("Location_coordinates.csv")
+ames_county = read.csv("AMES boundaries coordinates.csv")
+```
+
+
+```{r}
+#Determining NAs in the dataset
+sapply(data, function(x) sum(is.na(x)))
+```
+
+
+```{r}
+summary(data)
+```
+
+## Distributions of all columns
+```{r}
+ggplot(data,aes(x=X1stFlrSF)) + 
+  geom_histogram(bins= 30, fill = "white", col = "black") + 
+  xlab("1st Floor Area (Sq. Ft.)") + 
+  ggtitle("Histogram of 1st Floor Area")
+
+ggplot(data,aes(x=X2ndFlrSF)) + 
+  geom_histogram(bins= 30, fill = "white", col = "black") + 
+  xlab("2nd Floor Area (Sq. Ft.)") + 
+  ggtitle("Histogram of 2nd Floor Area")
+
+ggplot(data,aes(x=log(SalePrice))) + 
+  geom_histogram(bins= 30, fill = "white", col = "black") + 
+  xlab("log10 of Sale Price ($)") + 
+  ggtitle("Histogram of SalePrice")
+```
+
+```{r}
+ggplot(data,aes(x = BedroomAbvGr)) + 
+  geom_histogram(bins= 20, fill = "white", col = "black") + 
+  xlab("No. of Bedrooms") + 
+  ggtitle("Histogram of No. of Bedrooms")
+
+ggplot(data,aes(x = KitchenAbvGr)) + 
+  geom_histogram(bins= 20, fill = "white", col = "black") + 
+  xlab("No. of Kitchens") + 
+  ggtitle("Histogram of No. of Kitchens")
+```
+
+
+## Correlation of each variables
+```{r}
+correlation_matrix = cor(data[c('X1stFlrSF', 'X2ndFlrSF', 'BedroomAbvGr', 'KitchenAbvGr', 'YearBuilt', 'SalePrice')])
+corrplot::corrplot(correlation_matrix)
+```
+
+We can see that the features are not correlated with each other and thus we need to consider each of them.
+
+
+
+
+
+
+## Q1
+
+SalePrice Vs. 1st Floor Area
+```{r}
+ggplot(data, aes(x = X1stFlrSF, y = SalePrice)) + 
+  geom_point() + 
+  scale_y_log10() +
+  xlim(500, 2500) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggtitle("SalePrice Vs. 1st Floor Area") +
+  xlab("Area (Sq. Ft.)") +
+  ylab("Log Sales Price ($)")
+```
+
+The 1st Floor Area and Sale Price shows a linear trend and hence linear model is used. From the plot, we can deduce that the sale price increases with the increase in 1st floor area (excluding a few outliers).
+
+
+SalePrice Vs. 1st Floor Area and Bedroom Count
+```{r}
+plot.data = filter(data, BedroomAbvGr != 0)
+plot.data = filter(plot.data, BedroomAbvGr != 6)
+plot.data = filter(plot.data, BedroomAbvGr != 8)
+
+names(plot.data) = c('X1stFlrSF', 'X2ndFlrSF', 'BedroomCount', 'KitchenCount', 'YearBuilt', 'Neighborhood', 'SalePrice')
+
+ggplot(plot.data, aes(x = X1stFlrSF, y = SalePrice)) + 
+  geom_point() + 
+  scale_y_log10() +
+  #scale_x_log10() +
+  facet_wrap(BedroomCount ~ ., labeller = "label_both") +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggtitle("SalePrice Vs. 1st Floor Area & No. of Bedrooms") +
+  xlab("Area (Sq. Ft.)") +
+  ylab("Log Sales Price ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+From the above graph, it is evident that Sale Price is linearly dependent on the 1st Floor Area. In this graph, we introduce another factor "Bedroom Count" where we observe trend between each bedroom count. It also depicts the same story, where the trend is linearly increasing. Hence, bedroom count has no special effect on Sale Price in contrast with the 1st Floor area.
+
+
+Graph of "SalePrice Vs. Floor Area & Kitchen Count" is not included because there are not many houses which has kitchen on 2nd floor. This is because most of the houses only have 1 kitchen. Hence, we cannot get any insights from the plot.
+
+## Map of Neighborhood with corresponding prices of the houses
+```{r fig.width = 10}
+mean_data = data %>%
+  group_by(Neighborhood) %>%
+  summarise(MeanSalePrice = mean(SalePrice))
+
+ggplot(mean_data, aes(x = MeanSalePrice, y = reorder(Neighborhood, MeanSalePrice))) +
+  geom_point() +
+  ylab("Neighborhood") +
+  ggtitle("Neighborhood-wise Mean Sale Price") +
+  xlab("Mean Sale Price ($)")
+```
+
+
+  
+
+
+```{r fig.width = 10}
+map_data = inner_join(x = mean_data, y = location_data, by = 'Neighborhood')
+map_data = map_data[c('Neighborhood', 'Latitude', 'Longitude', 'MeanSalePrice')]
+
+ggplot(data = ames_county, aes(x = longitude, y = latitude)) +
+  geom_polygon(color = "gray90", size = 0.25) + 
+  theme_map() +
+  coord_map(projection = "lambert", lat0 = 30, lat1 = 40) +
+  scale_fill_gradient2(low = "white", mid = "blue", high = "red") +
+  geom_point(data = map_data, aes(x = Longitude, y = Latitude), color = "red") +
+  geom_text(data = map_data, aes(x = Longitude, y = Latitude, label = Neighborhood, size = MeanSalePrice), color = "green") +
+  ggtitle("Sale Price Analysis in AMES County (State: IOWA)")
+```
+
+The county plot above depicts the distribution of neighborhood in the AMES county. the size of the Neighborhood names suggests how expensive are the houses present in that area.
+  
+
+# Relation between 1st Floor Area & 2nd Floor Area 
+```{r fig.width = 10}
+data$yearRange = case_when(data$YearBuilt >=1872 & data$YearBuilt<=1912 ~ '1872 - 1912',
+                               data$YearBuilt>1912 & data$YearBuilt <=1952 ~ '1912 - 1952',
+                               data$YearBuilt>1952 & data$YearBuilt<=1992 ~ '1952 - 1992',
+                               data$YearBuilt >1992 & data$YearBuilt<=2010 ~ '1992 - 2010',
+                               is.na(data$YearBuilt) ~ "null")
+
+
+# 1872 - 1912
+data.lm = lm(SalePrice ~ X1stFlrSF * X2ndFlrSF, data = dplyr::filter(data, yearRange == '1872 - 1912'))
+data.grid = expand.grid(X1stFlrSF = seq(min(data$X1stFlrSF), 2500, 3), 
+                        X2ndFlrSF = seq(min(data$X2ndFlrSF), max(data$X2ndFlrSF), 3))
+data.predict = predict(data.lm, newdata = data.grid)
+data.df = data.frame(data.grid, fit = as.vector(data.predict))
+
+
+g1 = ggplot(data.df, aes(x = X1stFlrSF, y = X2ndFlrSF, z = fit, fill = fit)) +
+      geom_raster() +
+      scale_fill_distiller(palette = "RdYlBu") +
+      coord_fixed() +
+      geom_contour(color = "black") +
+      guides(fill = guide_legend(title = "SalePrice ($)")) +
+      xlab("1st Floor Area (Sq. Ft.)") +
+      ylab("2nd Floor Area (Sq. Ft.)") +
+      labs(subtitle = "Period: 1872 - 1912") +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# 1912 - 1952
+data.lm = lm(SalePrice ~ X1stFlrSF * X2ndFlrSF, data = dplyr::filter(data, yearRange == '1912 - 1952'))
+data.grid = expand.grid(X1stFlrSF = seq(min(data$X1stFlrSF), 2500, 3), 
+                        X2ndFlrSF = seq(min(data$X2ndFlrSF), max(data$X2ndFlrSF), 3))
+data.predict = predict(data.lm, newdata = data.grid)
+data.df = data.frame(data.grid, fit = as.vector(data.predict))
+
+
+g2 = ggplot(data.df, aes(x = X1stFlrSF, y = X2ndFlrSF, z = fit, fill = fit)) +
+      geom_raster() +
+      scale_fill_distiller(palette = "RdYlBu") +
+      coord_fixed() +
+      geom_contour(color = "black") +
+      guides(fill = guide_legend(title = "SalePrice ($)")) +
+      xlab("1st Floor Area (Sq. Ft.)") +
+      ylab("2nd Floor Area (Sq. Ft.)") +
+      labs(subtitle = "Period: 1912 - 1952") +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# 1952 - 1992
+data.lm = lm(SalePrice ~ X1stFlrSF * X2ndFlrSF, data = dplyr::filter(data, yearRange == '1952 - 1992'))
+data.grid = expand.grid(X1stFlrSF = seq(min(data$X1stFlrSF), 2500, 3), 
+                        X2ndFlrSF = seq(min(data$X2ndFlrSF), max(data$X2ndFlrSF), 3))
+data.predict = predict(data.lm, newdata = data.grid)
+data.df = data.frame(data.grid, fit = as.vector(data.predict))
+
+
+g3 = ggplot(data.df, aes(x = X1stFlrSF, y = X2ndFlrSF, z = fit, fill = fit)) +
+      geom_raster() +
+      scale_fill_distiller(palette = "RdYlBu") +
+      coord_fixed() +
+      geom_contour(color = "black") +
+      guides(fill = guide_legend(title = "SalePrice ($)")) +
+      xlab("1st Floor Area (Sq. Ft.)") +
+      ylab("2nd Floor Area (Sq. Ft.)") +
+      labs(subtitle = "Period: 1952 - 1992") +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# 1992 - 2010
+data.lm = lm(SalePrice ~ X1stFlrSF * X2ndFlrSF, data = dplyr::filter(data, yearRange == '1992 - 2010'))
+data.grid = expand.grid(X1stFlrSF = seq(min(data$X1stFlrSF), 2500, 3), 
+                        X2ndFlrSF = seq(min(data$X2ndFlrSF), max(data$X2ndFlrSF), 3))
+data.predict = predict(data.lm, newdata = data.grid)
+data.df = data.frame(data.grid, fit = as.vector(data.predict))
+
+
+g4 = ggplot(data.df, aes(x = X1stFlrSF, y = X2ndFlrSF, z = fit, fill = fit)) +
+      geom_raster() +
+      scale_fill_distiller(palette = "RdYlBu") +
+      coord_fixed() +
+      geom_contour(color = "black") +
+      guides(fill = guide_legend(title = "SalePrice ($)")) +
+      xlab("1st Floor Area (Sq. Ft.)") +
+      ylab("2nd Floor Area (Sq. Ft.)") +
+      labs(subtitle = "Period: 1992 - 2010") +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+grid.arrange(g1, g2, g3, g4, 
+      top = textGrob("Periodwise SalePrice Vs. 1st Floor & 2nd Floor areas", gp = gpar(fontsize = 20, font = 1)))
+```
+
+In the period 1872-1912, we can observe that most of the houses were in the low-mid price range. However post-1952, houses with low-mid price range & mid-high price range have equal proportion in market. The recent years show that low price range houses have decreased with increase in mid-high price range houses. 
+
+The contour plots are developed using linear model (lm) with interactions between the input variables (between 1st floor and 2nd floor area). This shows that the target variable "Sale Price" is more dependent on the "1st Floor Area" as compared to "2nd Floor Area".
+
+## Q2
+SalePrice Vs YearBuilt
+
+```{r}
+ggplot(data, aes(x = YearBuilt, y = SalePrice)) +
+  scale_y_log10() + 
+  geom_point() + 
+  geom_smooth(method = 'lm', se = FALSE) +
+  ggtitle("Year Built wise Sale Price") +
+  ylab("Sale Price ($)")
+```
+
+It can be observed from the above graph that sale prices increase with  year built.
+
+Lets have a multivariate relationship analysis with year built and saleprice data.
+
+Relationship Between Year Built and No. of Bedrooms
+
+```{r}
+plot.data = filter(data, BedroomAbvGr != 0)
+plot.data = filter(plot.data, BedroomAbvGr != 6)
+plot.data = filter(plot.data, BedroomAbvGr != 8)
+
+names(plot.data) = c('X1stFlrSF', 'X2ndFlrSF', 'BedroomCount', 'KitchenCount', 'YearBuilt', 'Neighborhood', 'SalePrice', 'yearRange')
+
+ggplot(plot.data, aes(x = YearBuilt, y = SalePrice)) + 
+  geom_point() + 
+  scale_y_log10() +
+  facet_wrap(BedroomCount ~ ., labeller = "label_both") +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggtitle("SalePrice Vs. YearBuilt & No. of Bedrooms") +
+  xlab("Year") +
+  ylab("Log Sales Price ($)")
+```
+
+Relationship Between Year Built and No. of Kitchens is not included since as afformentioned most of the data points (houses) contain only one kitchen.
+
+##Q3)
+Model fitting
+
+```{r}
+model.data = data[c('X1stFlrSF', 'X2ndFlrSF', 'BedroomAbvGr', 'KitchenAbvGr', 'YearBuilt', 'SalePrice')]
+model.data = predict(preProcess(model.data[,c(1:6)], method = c("range")), model.data)
+
+house_model.lm=lm(SalePrice ~ BedroomAbvGr + KitchenAbvGr + YearBuilt + X1stFlrSF + X2ndFlrSF, data = model.data)
+summary(house_model.lm)
+```
+
+```{r}
+model.data = data[c('X1stFlrSF', 'X2ndFlrSF', 'BedroomAbvGr', 'KitchenAbvGr', 'YearBuilt', 'SalePrice')]
+model.data = predict(preProcess(model.data[,c(1:6)], method = c("range")), model.data)
+
+
+house_model_new.lm=lm(SalePrice ~ BedroomAbvGr + KitchenAbvGr + YearBuilt * X1stFlrSF * X2ndFlrSF, data = model.data)
+summary(house_model_new.lm)
+```
+
+```{r}
+house_model.gam = gam(SalePrice ~  s(X1stFlrSF, YearBuilt, X2ndFlrSF ,BedroomAbvGr, KitchenAbvGr), data = data)
+summary(house_model.gam)
+```
+
+Linear Model is the best option for this dataset which can be deduced intuitively (since the target variable follows a linear relationship with most of the variables) as well as the R-square obtained from Linear Model is almost the same as obtained from a sophisticated model like GAM.
+Hence Linear Model is sufficient to explain the dataset fitted with the quantitative variables.
+
+
+This particular set of interactions achieves the highest R-squared.
+
+Important Feature-
+According to our EDA and model fitting it seems, YearBuilt is the most important feature. Intuitively (and as per our EDA results) YearBuilts shows linear relation with highest slope when plotted against the target variable SalesPrice. This makes sense as with progressing years house prices have increased considerably.
+
+Statistically it can be observed from the results of linear model fitting that YearBuilt variable has the highest estimate (weight) in the linear model consisting of all the quantitative variables. Hence it would be safe tp conclude that YearBuilt is the most significant variable.
+
+
+```{r}
+data.lm.df = augment(house_model_new.lm)
+data.lm.df = data.lm.df[c('SalePrice', '.fitted')]
+names(data.lm.df) = c('Actual Sale Price', 'Predicted Sale Price')
+
+data.lm.df = data.lm.df %>%
+  gather(key = "SalePrice", value = "Price", c('Actual Sale Price', 'Predicted Sale Price'))
+
+ggplot(data.lm.df, aes(x = Price, group = SalePrice)) +
+  geom_density(aes(fill = SalePrice, alpha = 0.6)) +
+  xlab("Price ($)") +
+  ggtitle("Density plot of Sale Price grouped by Actual & Predicted values")
+```
